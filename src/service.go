@@ -88,3 +88,38 @@ func (s *Service) EnsureContainer(ctx context.Context) (error) {
 	s.containerID = &containerResponse.ID
 	return err
 }
+
+
+func (s *Service) Start(ctx context.Context) error {
+	err := s.EnsureImage(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = s.EnsureContainer(ctx)
+	if err != nil {
+		return err
+	}
+
+	containerID, err := s.ID()
+	if err != nil {
+		return err
+	}
+
+	return s.dockerClient.ContainerStart(ctx, containerID, container.StartOptions{})
+}
+
+func (s *Service) Logs(ctx context.Context) (io.ReadCloser, error) {
+	containerId, err := s.ID()
+	if err != nil {
+		return nil, err
+	}
+
+	return s.dockerClient.ContainerLogs(ctx, containerId, container.LogsOptions{
+		ShowStderr: true,
+        ShowStdout: true,
+        Timestamps: false,
+        Follow:     true,
+        Tail:       "40",
+	})
+}

@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin
+    container_name: jellyfin
+    ports:
+        - '8096:8096'
+    volumes:
+      - jellyfin_config:/config
+      - jellyfin_cache:/cache
+      - radarr_movies:/home/movies
+      - sonarr_tvseries:/home/tv
+    restart: always
+  jellyseerr:
+    image: fallenbagel/jellyseerr
+    container_name: jellyseerr
+    environment:
+      - 'LOG_LEVEL=debug'
+      - 'TZ=Europe/Warsaw'
+    ports:
+      - '5055:5055'
+    volumes:
+      - jellyfin_config:/app/config
+      - radarr_movies:/home/movies
+      - sonarr_tvseries:/home/tv
+    restart: always
+  sonarr:
+    build:
+      dockerfile: sonarr.dockerfile
+    container_name: sonarr
+    volumes:
+      - sonarr_config:/config
+      - sonarr_tvseries:/home/tv
+      - qbittorrent_downloads:/downloads
+    environment:
+      - 'PUID=0'
+      - 'PGID=65534'
+      - 'TZ=Europe/Warsaw'
+    ports:
+      - '8989:8989'
+    restart: always
+  radarr:
+    build:
+      dockerfile: radarr.dockerfile
+    container_name: radarr
+    ports:
+      - '7878:7878'
+    environment:
+      - 'PUID=0'
+      - 'PGID=65534'
+    volumes:
+      - radarr_movies:/home/movies
+      - radarr_config:/config
+      - qbittorrent_downloads:/downloads
+    restart: always
+  bazarr:
+    build:
+      dockerfile: bazarr.dockerfile
+    container_name: bazarr
+    environment:
+      - 'PUID=0'
+      - 'PGID=65534'
+    volumes:
+      - bazarr_config:/config
+      - radarr_movies:/home/movies
+      - sonarr_tvseries:/home/tv
+    ports:
+      - 6767:6767
+    restart: always
+  qbittorrent:
+    image: linuxserver/qbittorrent
+    container_name: qbittorrent
+    volumes:
+      - qbittorrent_downloads:/downloads
+    restart: always
+  jackett:
+    container_name: jackett
+    image: linuxserver/jackett
+    ports:
+      - '9117:9117'
+    restart: always
+# todo:
+#   - flaresolverr
+#   - kopia
+
+volumes:
+  jellyfin_config: {}
+  jellyfin_cache: {}
+  sonarr_config: {}
+  radarr_config: {}
+  bazarr_config: {}
+  radarr_movies: {}
+  sonarr_tvseries: {}
+  qbittorrent_downloads: {}

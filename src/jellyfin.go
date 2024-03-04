@@ -1,14 +1,12 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"main/cache"
-	"main/utils"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
 )
 
 type Jellyfin struct {
@@ -16,54 +14,65 @@ type Jellyfin struct {
 	APIToken string
 }
 
-func NewJellyfin(cli *client.Client, cache *cache.RoseDBClient) (*Jellyfin, error) {
-	port, err := nat.NewPort("tcp", "8096")
-	if err != nil {
-		return nil, err
-	}
+func NewJellyfin(ctx context.Context, cli *client.Client, cache *cache.RoseDBClient) (*Jellyfin, error) {
+	service, err := NewService(
+		ctx,
+		ImageConfig{
+			RefString:        "docker.io/jellyfin/jellyfin",
+			Image:            "jellyfin/jellyfin",
+			ImagePullOptions: types.ImagePullOptions{},
+		},
+		ContainerConfig{
+			VolumeMapping: []mount.Mount{
+				{
+					Type:   "volume",
+					Source: "jellyfin-config",
+					Target: "/config",
+				},
+			},
+			Env: []string{
+				"PUID=1000",
+				"PGID=1000",
+				"TZ=Europe/Warsaw",
+			},
+		},
+		cli, cache, []int{8096},
+	)
 
-	hostPort, err := utils.GetFreePort()
 	if err != nil {
 		return nil, err
 	}
 
 	return &Jellyfin{
-		Service: Service{
-			ImageConfig: ImageConfig{
-				RefString: "docker.io/jellyfin/jellyfin",
-				Image: "jellyfin/jellyfin",
-				ImagePullOptions: types.ImagePullOptions{},
-			},
-			ContainerConfig: ContainerConfig{
-				PortMapping: nat.PortMap{
-					port: []nat.PortBinding{
-						{
-							HostIP: "0.0.0.0",
-							HostPort: fmt.Sprintf("%d", hostPort),
-						},
-					},
-				},
-				VolumeMapping: []mount.Mount{
-					{
-						Type: "bind",
-						Source:         "/Users/voxelost/workspace/dev/jellyfin/.dev/volumes/jellyfin/cache",
-						Target:         "/cache",
-					},
-					{
-						Type: "bind",
-						Source:         "/Users/voxelost/workspace/dev/jellyfin/.dev/volumes/jellyfin/config",
-						Target:         "/config",
-					},
-					{
-						Type: "bind",
-						Source:         "/Users/voxelost/workspace/dev/jellyfin/.dev/volumes/jellyfin/media",
-						Target:         "/media",
-						ReadOnly: true,
-					},
-				},
-			},
-			dockerClient: cli,
-			cacheClient: cache,
-		},
+		Service: *service,
 	}, nil
+}
+
+func (j *Jellyfin) BaseSetup() error {
+	// setup language
+	_, err := j.HttpPost("/Startup/Configuration", `{"UICulture":"en-US","MetadataCountryCode":"US","PreferredMetadataLanguage":"en"}`)
+	if err != nil {
+		return err
+	}
+
+	_, err = j.HttpGet("/Startup/User")
+	if err != nil {
+		return err
+	}
+
+	// setup language
+	_, err = j.HttpPost("/Startup/User", `{"Name":"root","Password":"root"}`)
+	if err != nil {
+		return err
+	}
+
+	// setup remote access
+	_, err = j.HttpPost("/Startup/RemoteAccess", `{"EnableRemoteAccess":true,"EnableAutomaticPortMapping":false}`)
+	if err != nil {
+		return err
+	}
+
+	// finish setup
+	_, err = j.HttpPost("/Startup/Complete", ``)
+	return err
 }

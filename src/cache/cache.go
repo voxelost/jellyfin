@@ -8,9 +8,7 @@ import (
 )
 
 type RoseDBClient struct {
-
 	client *rosedb.RoseDB
-
 }
 
 func New() (*RoseDBClient, error) {

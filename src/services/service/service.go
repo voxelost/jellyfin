@@ -1,4 +1,4 @@
-package main
+package service
 
 import (
 	"context"
@@ -6,15 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"main/cache"
 	"main/utils"
-	"net/http"
+	"net/url"
 	"os"
-	"strings"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/google/uuid"
@@ -38,12 +37,12 @@ type Service struct {
 	ContainerConfig ContainerConfig
 
 	dockerClient *client.Client
-	cacheClient  *cache.RoseDBClient
-	containerID  *string   // Docker Container ID of the Service
-	uuid         uuid.UUID // Internal ID
+	// cacheClient  *cache.RoseDBClient
+	containerID *string   // Docker Container ID of the Service
+	uuid        uuid.UUID // Internal ID
 }
 
-func NewService(ctx context.Context, imageConfig ImageConfig, containerConfig ContainerConfig, dockerClient *client.Client, cacheClient *cache.RoseDBClient, containerPorts []int) (*Service, error) {
+func NewService(ctx context.Context, imageConfig ImageConfig, containerConfig ContainerConfig, dockerClient *client.Client, containerPorts []int) (*Service, error) {
 	uuid := uuid.New()
 
 	var patchedVolumes []mount.Mount
@@ -82,8 +81,8 @@ func NewService(ctx context.Context, imageConfig ImageConfig, containerConfig Co
 		ImageConfig:     imageConfig,
 		ContainerConfig: containerConfig,
 		dockerClient:    dockerClient,
-		cacheClient:     cacheClient,
-		uuid:            uuid,
+		// cacheClient:     cacheClient,
+		uuid: uuid,
 	}, nil
 }
 
@@ -105,6 +104,18 @@ func (s *Service) ApiPort() (nat.Port, error) {
 	return "", fmt.Errorf("service doesn't expose any ports")
 }
 
+func (s *Service) ApiAddress() (url.URL, error) {
+	port, err := s.ApiPort()
+	if err != nil {
+		return url.URL{}, err
+	}
+
+	return url.URL{
+		Scheme: "http",
+		Host:   fmt.Sprintf("localhost:%s", port.Port()),
+	}, nil
+}
+
 func (s *Service) EnsureImage(ctx context.Context) error {
 	reader, err := s.dockerClient.ImagePull(ctx, s.ImageConfig.RefString, s.ImageConfig.ImagePullOptions)
 	if err != nil {
@@ -118,7 +129,6 @@ func (s *Service) EnsureImage(ctx context.Context) error {
 }
 
 func (s *Service) EnsureContainer(ctx context.Context) error {
-	// todo: try to get container id from cache
 	volumeMap := make(map[string]struct{})
 	for _, volume := range s.ContainerConfig.VolumeMapping {
 		volumeMap[volume.Target] = struct{}{}
@@ -159,7 +169,11 @@ func (s *Service) EnsureContainer(ctx context.Context) error {
 			},
 			PortBindings: portBindings,
 		},
-		nil, nil, "",
+		&network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				"default": &network.EndpointSettings{},
+			},
+		}, nil, "",
 	)
 
 	s.containerID = &containerResponse.ID
@@ -202,7 +216,9 @@ func (s *Service) GetLogsReader(ctx context.Context) (io.ReadCloser, error) {
 
 func (s *Service) AttachLogs(ctx context.Context) error {
 	reader, err := s.GetLogsReader(ctx)
-	cerr(err)
+	if err != nil {
+		return err
+	}
 
 	defer reader.Close()
 
@@ -234,62 +250,4 @@ func (s *Service) AttachLogs(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func (s *Service) HttpGet(path string) (*http.Response, error) {
-	exposedPort, err := s.ApiPort()
-	if err != nil {
-		return nil, err
-	}
-
-	path = strings.TrimLeft(path, "/")
-
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%s/%s", exposedPort.Port(), path))
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBodyReader := resp.Body
-		defer respBodyReader.Close()
-
-		buf := make([]byte, resp.ContentLength)
-		respBodyReader.Read(buf)
-		return nil, fmt.Errorf("response status code is not 2XX: %s", buf)
-	}
-
-	return resp, err
-}
-
-func (s *Service) HttpPost(path string, body string) (*http.Response, error) {
-	exposedPort, err := s.ApiPort()
-	if err != nil {
-		return nil, err
-	}
-
-	path = strings.TrimLeft(path, "/")
-
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/%s", exposedPort.Port(), path), strings.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Emby-Authorization", `Client="Jellyfin Web", Device="Firefox", DeviceId="TW96aWxsYS81LjAgKE1hY2ludG9zaDsgSW50ZWwgTWFjIE9TIFggMTAuMTU7IHJ2OjEyMy4wKSBHZWNrby8yMDEwMDEwMSBGaXJlZm94LzEyMy4wfDE3MDk1MTM4NzIxOTQ1", Version="10.8.13"`)
-
-	resp, err := http.Post(fmt.Sprintf("http://localhost:%s/%s", exposedPort.Port(), path), "application/json", strings.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBodyReader := resp.Body
-		defer respBodyReader.Close()
-
-		buf := make([]byte, resp.ContentLength)
-		respBodyReader.Read(buf)
-		return nil, fmt.Errorf("response status code is not 2XX: %s", buf)
-	}
-
-	return resp, err
 }

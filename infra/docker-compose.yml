@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   jellyfin:
-    image: jellyfin/jellyfin
+    image: jellyfin/jellyfin@2024031805
     container_name: jellyfin
     ports:
         - '8096:8096'
@@ -11,9 +11,9 @@ services:
       - jellyfin_cache:/cache
       - radarr_movies:/home/movies
       - sonarr_tvseries:/home/tv
-    restart: always
+    restart: unless-stopped
   jellyseerr:
-    image: fallenbagel/jellyseerr
+    image: fallenbagel/jellyseerr@1.7.0
     container_name: jellyseerr
     environment:
       - 'LOG_LEVEL=debug'
@@ -24,7 +24,18 @@ services:
       - jellyfin_config:/app/config
       - radarr_movies:/home/movies
       - sonarr_tvseries:/home/tv
-    restart: always
+    restart: unless-stopped
+  prowlarr:
+    image: linuxserver/prowlarr@amd64-1.14.3-main
+    volumes:
+      - prowlarr_config:/config
+    environment:
+      - 'PUID=0'
+      - 'PGID=65534'
+      - 'TZ=Europe/Warsaw'
+    ports:
+      - '9696:9696'
+    restart: unless-stopped
   sonarr:
     build:
       dockerfile: sonarr.dockerfile
@@ -39,7 +50,7 @@ services:
       - 'TZ=Europe/Warsaw'
     ports:
       - '8989:8989'
-    restart: always
+    restart: unless-stopped
   radarr:
     build:
       dockerfile: radarr.dockerfile
@@ -53,7 +64,7 @@ services:
       - radarr_movies:/home/movies
       - radarr_config:/config
       - qbittorrent_downloads:/downloads
-    restart: always
+    restart: unless-stopped
   bazarr:
     build:
       dockerfile: bazarr.dockerfile
@@ -67,19 +78,13 @@ services:
       - sonarr_tvseries:/home/tv
     ports:
       - 6767:6767
-    restart: always
+    restart: unless-stopped
   qbittorrent:
-    image: linuxserver/qbittorrent
+    image: linuxserver/qbittorrent@4.6.3
     container_name: qbittorrent
     volumes:
       - qbittorrent_downloads:/downloads
-    restart: always
-  jackett:
-    container_name: jackett
-    image: linuxserver/jackett
-    ports:
-      - '9117:9117'
-    restart: always
+    restart: unless-stopped
 # todo:
 #   - flaresolverr
 #   - kopia
@@ -87,6 +92,7 @@ services:
 volumes:
   jellyfin_config: {}
   jellyfin_cache: {}
+  prowlarr_config: {}
   sonarr_config: {}
   radarr_config: {}
   bazarr_config: {}
